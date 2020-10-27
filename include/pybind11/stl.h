@@ -41,6 +41,11 @@
 #    include <variant>
 #    define PYBIND11_HAS_VARIANT 1
 #  endif
+// std::variant
+#  if defined(PYBIND11_CPP17) && __has_include(<filesystem>)
+#    include <filesystem>
+#    define PYBIND11_HAS_FILESYSTEM 1
+#  endif
 #elif defined(_MSC_VER) && defined(PYBIND11_CPP17)
 #  include <optional>
 #  include <variant>
@@ -370,6 +375,43 @@ struct variant_caster<V<Ts...>> {
 #if PYBIND11_HAS_VARIANT
 template <typename... Ts>
 struct type_caster<std::variant<Ts...>> : variant_caster<std::variant<Ts...>> { };
+#endif
+
+#if PYBIND11_HAS_FILESYSTEM && ((PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 6) || PY_MAJOR_VERSION >= 4)
+template <> struct type_caster<std::filesystem::path>
+{
+public:
+    PYBIND11_TYPE_CASTER(std::filesystem::path, _("path_like"));
+
+    bool load(handle src, bool)
+    {
+        auto fs_encoded = reinterpret_steal<object>(PyOS_FSPath(src.ptr()));
+        if (!fs_encoded)
+        {
+            PyErr_Clear();
+            return false;
+        }
+        if (PyBytes_Check(fs_encoded.ptr()))   // fs_encoded may be bytes or unicode
+            fs_encoded = reinterpret_steal<object>(PyUnicode_DecodeFSDefault(PyBytes_AS_STRING(fs_encoded.ptr())));
+
+        auto size = Py_ssize_t{};
+        auto buffer = PyUnicode_AsUTF8AndSize(fs_encoded.ptr(), &size);
+        if (! buffer)
+        {
+            PyErr_Clear();
+            return false;
+        }
+
+        value = std::filesystem::u8path(buffer, buffer + size);
+        return true;
+    }
+
+    static handle cast(std::filesystem::path src, return_value_policy /* policy */, handle /* parent */)
+    {
+        auto data = src.u8string();
+        return PyUnicode_DecodeUTF8(data.data(), data.size(), nullptr /* usually means strict */);
+    }
+};
 #endif
 
 NAMESPACE_END(detail)
